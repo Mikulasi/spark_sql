@@ -2,11 +2,12 @@ package com.epam.spark_sql
 
 import org.apache.spark.SparkConf
 import org.apache.spark.sql.expressions.UserDefinedFunction
-import org.apache.spark.sql.{DataFrame, SparkSession}
+import org.apache.spark.sql.functions.{sum, udf, when}
+import org.apache.spark.sql.{DataFrame, SparkSession, functions}
 
 object Motels {
-    val ERRONEOUS_DIR: String = "erroneous"
-    val AGGREGATED_DIR: String = "aggregated"
+  val ERRONEOUS_DIR: String = "erroneous"
+  val AGGREGATED_DIR: String = "aggregated"
 
   def main(args: Array[String]): Unit = {
 
@@ -83,12 +84,45 @@ object Motels {
         .save(s"$outputBasePath/$AGGREGATED_DIR")
     }
 
-    def getRawBids(sqlContext: SparkSession, bidsPath: String): DataFrame = ???
-//      val path = sqlContext.read.text(bidsPath)
+    def getRawBids(sqlContext: SparkSession, bidsPath: String): DataFrame = {
+      import sqlContext.implicits._
+      sqlContext.read.textFile(bidsPath)
+        .map(m => m.split(",")).toDF()
+    }
 
-    def getErroneousRecords(rawBids: DataFrame): DataFrame = ???
+    def getErroneousRecords(rawBids: DataFrame): DataFrame = ??? /*{
+//      val filter = rawBids.filter($"date" => records(2).contains("ERROR"))
+//      val errRecords = filter.map(err => ("%s,%s".format(err(1), err(2)), 1)).reduceByKey((a, b) => a + b)
+//      errRecords.map(pairs => "%s,%d".format(pairs._1, pairs._2))
+//      val errors = rawBids.agg(
+//        functions.sum(functions.when(rawBids("HU").isNull, 1).otherwise(0)),
+//        functions.sum(functions.when(rawBids("HU").isNull, 1).otherwise(0)),
+//        functions.sum(functions.when(rawBids("HU").isNull, 1).otherwise(0)),
+//        functions.sum(functions.when(rawBids("UK").isNull, 1).otherwise(0)),
+//        functions.sum(functions.when(rawBids("NL").isNull, 1).otherwise(0)),
+//        functions.sum(functions.when(rawBids("US").isNull, 1).otherwise(0)),
+//        functions.sum(functions.when(rawBids("MX").isNull, 1).otherwise(0)),
+//        functions.sum(functions.when(rawBids("AU").isNull, 1).otherwise(0)),
+//        functions.sum(functions.when(rawBids("CA").isNull, 1).otherwise(0)),
+//        functions.sum(functions.when(rawBids("CN").isNull, 1).otherwise(0)),
+//        functions.sum(functions.when(rawBids("KR").isNull, 1).otherwise(0)),
+//        functions.sum(functions.when(rawBids("BE").isNull, 1).otherwise(0)),
+//        functions.sum(functions.when(rawBids("I").isNull, 1).otherwise(0)),
+//        functions.sum(functions.when(rawBids("JP").isNull, 1).otherwise(0)),
+//        functions.sum(functions.when(rawBids("IN").isNull, 1).otherwise(0)),
+//        functions.sum(functions.when(rawBids("HN").isNull, 1).otherwise(0)),
+//        functions.sum(functions.when(rawBids("GY").isNull, 1).otherwise(0)),
+//        functions.sum(functions.when(rawBids("DE").isNull, 1).otherwise(0)))
 
-    def getExchangeRates(sqlContext: SparkSession, exchangeRatesPath: String): DataFrame = ???
+//    }*/
+
+    def getExchangeRates(sqlContext: SparkSession, exchangeRatesPath: String): DataFrame = {
+      import sqlContext.implicits._
+      val usdEur = 1.025
+      sqlContext.read.textFile(exchangeRatesPath)
+      .map(m => m.split(","))
+      .map(lines => (lines(0), lines(3).toDouble * usdEur)).toDF()
+    }
 
     def getConvertDate: UserDefinedFunction = ???
 
