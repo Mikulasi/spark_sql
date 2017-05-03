@@ -1,9 +1,10 @@
 package com.epam.spark_sql
 
 import org.apache.spark.SparkConf
+import org.apache.spark.sql._
 import org.apache.spark.sql.expressions.UserDefinedFunction
-import org.apache.spark.sql.functions.{sum, udf, when}
-import org.apache.spark.sql.{DataFrame, SparkSession, functions}
+import org.apache.spark.sql.functions._
+import org.apache.spark.sql.types.{DoubleType, StringType, StructField, StructType}
 
 object Motels {
   val ERRONEOUS_DIR: String = "erroneous"
@@ -56,7 +57,7 @@ object Motels {
         * UserDefinedFunction to convert between date formats.
         * Hint: Check the formats defined in Constants class
         */
-      val convertDate: UserDefinedFunction = getConvertDate
+      val convertDate: UserDefinedFunction = convert_date
 
       /**
         * Task 3:
@@ -85,48 +86,64 @@ object Motels {
     }
 
     def getRawBids(sqlContext: SparkSession, bidsPath: String): DataFrame = {
-      import sqlContext.implicits._
-      sqlContext.read.textFile(bidsPath)
-        .map(m => m.split(",")).toDF()
+      val file = sqlContext.read
+        .option("delimiter", Constants.DELIMITER)
+        .option("mode", "PERMISSIVE")
+        .schema(schema)
+        .format(Constants.CSV_FORMAT)
+        .load(bidsPath)
+      file.createOrReplaceTempView("bids")
+      sqlContext.sql("select * from bids").toDF()
     }
 
-    def getErroneousRecords(rawBids: DataFrame): DataFrame = ??? /*{
-//      val filter = rawBids.filter($"date" => records(2).contains("ERROR"))
-//      val errRecords = filter.map(err => ("%s,%s".format(err(1), err(2)), 1)).reduceByKey((a, b) => a + b)
-//      errRecords.map(pairs => "%s,%d".format(pairs._1, pairs._2))
-//      val errors = rawBids.agg(
-//        functions.sum(functions.when(rawBids("HU").isNull, 1).otherwise(0)),
-//        functions.sum(functions.when(rawBids("HU").isNull, 1).otherwise(0)),
-//        functions.sum(functions.when(rawBids("HU").isNull, 1).otherwise(0)),
-//        functions.sum(functions.when(rawBids("UK").isNull, 1).otherwise(0)),
-//        functions.sum(functions.when(rawBids("NL").isNull, 1).otherwise(0)),
-//        functions.sum(functions.when(rawBids("US").isNull, 1).otherwise(0)),
-//        functions.sum(functions.when(rawBids("MX").isNull, 1).otherwise(0)),
-//        functions.sum(functions.when(rawBids("AU").isNull, 1).otherwise(0)),
-//        functions.sum(functions.when(rawBids("CA").isNull, 1).otherwise(0)),
-//        functions.sum(functions.when(rawBids("CN").isNull, 1).otherwise(0)),
-//        functions.sum(functions.when(rawBids("KR").isNull, 1).otherwise(0)),
-//        functions.sum(functions.when(rawBids("BE").isNull, 1).otherwise(0)),
-//        functions.sum(functions.when(rawBids("I").isNull, 1).otherwise(0)),
-//        functions.sum(functions.when(rawBids("JP").isNull, 1).otherwise(0)),
-//        functions.sum(functions.when(rawBids("IN").isNull, 1).otherwise(0)),
-//        functions.sum(functions.when(rawBids("HN").isNull, 1).otherwise(0)),
-//        functions.sum(functions.when(rawBids("GY").isNull, 1).otherwise(0)),
-//        functions.sum(functions.when(rawBids("DE").isNull, 1).otherwise(0)))
+    def schema: StructType = {
+      StructType(
+        Array(
+          StructField("motelId", StringType), StructField("bidDate", StringType, nullable = true), StructField("HU", StringType, nullable = true),
+          StructField("UK", DoubleType, nullable = true), StructField("NL", DoubleType, nullable = true), StructField("US", DoubleType, nullable = true),
+          StructField("MX", DoubleType, nullable = true), StructField("AU", DoubleType, nullable = true), StructField("CA", DoubleType, nullable = true),
+          StructField("CN", DoubleType, nullable = true), StructField("KR", DoubleType, nullable = true), StructField("BE", DoubleType, nullable = true),
+          StructField("I", DoubleType, nullable = true), StructField("JP", DoubleType, nullable = true), StructField("IN", DoubleType, nullable = true),
+          StructField("HN", DoubleType, nullable = true), StructField("GY", DoubleType, nullable = true), StructField("DE", DoubleType, nullable = true)))
+    }
 
-//    }*/
+    def getErroneousRecords(rawBids: DataFrame): DataFrame = {
+      rawBids.select("motelId", "bidDate", "HU")
+        .filter(col("HU").rlike("ERROR"))
+        .groupBy("bidDate", "HU")
+        .agg(count(col("HU")))
+    }
+
 
     def getExchangeRates(sqlContext: SparkSession, exchangeRatesPath: String): DataFrame = {
-      import sqlContext.implicits._
-      val usdEur = 1.025
-      sqlContext.read.textFile(exchangeRatesPath)
-      .map(m => m.split(","))
-      .map(lines => (lines(0), lines(3).toDouble * usdEur)).toDF()
+      sqlContext.read
+        .option("delimiter", Constants.DELIMITER)
+        .option("mode", "PERMISSIVE")
+        .schema(Constants.EXCHANGE_RATES_HEADER)
+        .format(Constants.CSV_FORMAT)
+        .load("./resources/exchange_rate.txt")
     }
 
-    def getConvertDate: UserDefinedFunction = ???
+    def convert_date: UserDefinedFunction = {
+      udf((func: String) => Constants.INPUT_DATE_FORMAT.parseDateTime(func).toString(Constants.OUTPUT_DATE_FORMAT))
+    }
 
-    def getBids(rawBids: DataFrame, exchangeRates: DataFrame): DataFrame = ???
+    def getBids(rawBids: DataFrame, exchangeRates: DataFrame): DataFrame = {
+      val usdEur = 1.025
+      //      val wq = exchangeRates.createOrReplaceTempView("currency")
+      exchangeRates
+        .select(convert_date(col("ValidFrom")) as "valid_from")
+        .select("CurrencyName", "CurrencyCode", "ExchangeRate")
+        .groupBy("ValidFrom", "CurrencyName", "CurrencyCode", "ExchangeRate")
+        .agg(bround(col("ExchangeRate") * usdEur, 3).as("usd_convertion"))
+      rawBids
+        .filter(not(col("HU").contains("ERROR")))
+        .select("motelId")
+        .select(convert_date(col("bidDate")))
+        .select("US", "CA", "MX")
+        .groupBy("US", "CA", "MX")
+      exchangeRates.join(rawBids, exchangeRates("valid_from") === rawBids("motelId")).groupBy(rawBids("US", "CA", "MX"), exchangeRates("ExchangeRate"))
+    }
 
     def getMotels(sqlContext: SparkSession, motelsPath: String): DataFrame = ???
 
